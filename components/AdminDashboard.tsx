@@ -13,24 +13,27 @@ interface AdminDashboardProps {
   onRemoveSample: (id: string, index: number) => void;
   lang: Language;
   setLang: (lang: Language) => void;
-  threshold: number; // New Prop
-  setThreshold: (val: number) => void; // New Prop
+  threshold: number;
+  setThreshold: (val: number) => void;
+}
+
+// Internal Interface for Delete Confirmation State
+interface DeleteState {
+  type: 'PROFILE' | 'SAMPLE';
+  id: string; // Profile ID
+  sampleIndex?: number; // Only for samples
+  name?: string; // For display
 }
 
 /**
  * CONFIGURATION & MANAGEMENT PANEL
  * 配置与管理面板
- * 
- * Provides interface for:
- * 1. Registering new faces / 注册新人脸
- * 2. Managing existing profiles (View/Delete) / 管理现有档案（查看/删除）
- * 3. Tuning parameters / 调整参数
  */
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
   profiles, logs, onAddProfile, onDeleteProfile, onAddSample, onRemoveSample, 
   lang, setLang, threshold, setThreshold 
 }) => {
-  const t = translations[lang];
+  const t = translations[lang] || translations['en']; // Safety fallback
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'analytics'>('users');
   
   // -- TRAINING STATE / 训练状态 --
@@ -40,20 +43,40 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [modelsReady, setModelsReady] = useState(false);
   
   // 'NEW' = Creating user, 'TRAIN' = Adding sample to existing user
-  // 'NEW' = 创建新用户，'TRAIN' = 为现有用户添加样本
   const [trainingMode, setTrainingMode] = useState<'NEW' | 'TRAIN'>('NEW');
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
   // -- MODAL STATE / 模态框状态 --
   const [editingProfile, setEditingProfile] = useState<PersonProfile | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteState | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Helper to safely get the selected profile
+  const selectedProfile = profiles.find(p => p.id === selectedProfileId);
 
   // Initialize AI Models / 初始化AI模型
   useEffect(() => {
     loadModels().then(() => setModelsReady(true));
   }, []);
+
+  // Stop camera when unmounting or switching tabs
+  useEffect(() => {
+    return () => {
+        stopCamera();
+    };
+  }, []);
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+        setCameraActive(false);
+    }
+  };
 
   // Start Camera Stream / 开启摄像头流
   const startCamera = async () => {
@@ -63,17 +86,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         videoRef.current.srcObject = stream;
         setCameraActive(true);
       }
-    } catch(e) { alert("Camera Error"); }
+    } catch(e) { 
+        console.error("Camera access failed:", e);
+        alert(t.cameraAccessDenied || "Camera Error"); 
+    }
   };
 
   /**
-   * Core Function: Handle Capture & Processing
-   * 核心功能：处理捕获与分析
-   * 
-   * Steps / 步骤:
-   * 1. Get video frame / 获取视频帧
-   * 2. Use AI to extract 128-d vector / 使用AI提取128维向量
-   * 3. Save to state/storage / 保存到状态/存储
+   * Handle Capture & Processing
    */
   const handleCapture = async () => {
     if (trainingMode === 'NEW' && !newName) return alert(t.alertEnterName);
@@ -112,6 +132,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                    // Reset to default mode / 重置为默认模式
                    setTrainingMode('NEW'); 
                    setSelectedProfileId(null);
+                   setNewName(''); // Clear name just in case
                 }
             }
         }
@@ -126,10 +147,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Switch to "Add Sample" mode for a specific user
   // 切换到特定用户的“添加样本”模式
   const startTrainingExisting = (id: string) => {
+     // 1. State updates
      setSelectedProfileId(id);
      setTrainingMode('TRAIN');
-     startCamera();
-     window.scrollTo({ top: 0, behavior: 'smooth' });
+     
+     // 2. Defer camera start and scroll to allow React to render the Training UI first
+     // 使用 setTimeout 确保 React 完成 DOM 渲染后再操作 DOM（滚动和摄像头绑定）
+     setTimeout(() => {
+         if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+         }
+         startCamera();
+     }, 100);
   };
 
   // Open the "Manage Samples" modal
@@ -138,13 +167,74 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setEditingProfile(profile);
   };
 
+  // Handle the final execution of deletion
+  const executeDelete = () => {
+    if (!deleteConfirm) return;
+
+    if (deleteConfirm.type === 'PROFILE') {
+        onDeleteProfile(deleteConfirm.id);
+        // Also close the training mode if we deleted the active user
+        if (selectedProfileId === deleteConfirm.id) {
+            setTrainingMode('NEW');
+            setSelectedProfileId(null);
+        }
+    } else if (deleteConfirm.type === 'SAMPLE' && deleteConfirm.sampleIndex !== undefined) {
+        onRemoveSample(deleteConfirm.id, deleteConfirm.sampleIndex);
+        // If inside the edit modal, check if we need to close it (if no images left)
+        if (editingProfile && editingProfile.id === deleteConfirm.id) {
+            // We need to check the updated length, but React state is async. 
+            // We can check the CURRENT length. If it is 1, it will become 0.
+            if (editingProfile.images.length <= 1) {
+                setEditingProfile(null);
+            }
+        }
+    }
+    setDeleteConfirm(null);
+  };
+
   return (
     <div className="h-full flex flex-col animate-fade-in bg-gray-900 relative">
       
       {/* ========================================================= */}
+      {/* DELETE CONFIRMATION MODAL (High Z-Index)                  */}
+      {/* ========================================================= */}
+      {deleteConfirm && (
+        <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+             <div className="bg-gray-800 rounded-xl border border-gray-600 shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 animate-fade-in">
+                 <div className="p-6 text-center">
+                    <div className="w-16 h-16 bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                    <h3 className="text-xl font-bold text-white mb-2">
+                        {deleteConfirm.type === 'PROFILE' ? t.confirmDeleteProfile : t.confirmDeleteSample}
+                    </h3>
+                    <p className="text-gray-400 text-sm mb-6">
+                        {deleteConfirm.type === 'PROFILE' && <span className="text-white font-bold block text-lg my-1">"{deleteConfirm.name}"</span>}
+                        {t.actionUndone}
+                    </p>
+                    <div className="flex gap-3 justify-center">
+                        <button 
+                            onClick={() => setDeleteConfirm(null)}
+                            className="px-5 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 transition font-medium"
+                        >
+                            {t.btnCancel}
+                        </button>
+                        <button 
+                            onClick={executeDelete}
+                            className="px-5 py-2 rounded-lg bg-red-600 text-white hover:bg-red-500 transition font-bold shadow-lg shadow-red-900/50"
+                        >
+                            {t.btnConfirm}
+                        </button>
+                    </div>
+                 </div>
+             </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
       {/* SAMPLE MANAGEMENT MODAL / 样本管理模态框                  */}
-      {/* Allows deleting specific bad images/vectors               */}
-      {/* 允许删除特定的不良图片/向量                               */}
       {/* ========================================================= */}
       {editingProfile && (
         <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -166,10 +256,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                                     <button 
                                         onClick={() => {
-                                            onRemoveSample(editingProfile.id, idx);
-                                            setEditingProfile(null); 
+                                            // Trigger delete confirmation instead of immediate delete
+                                            setDeleteConfirm({
+                                                type: 'SAMPLE',
+                                                id: editingProfile.id,
+                                                sampleIndex: idx
+                                            });
                                         }}
-                                        className="bg-red-600 text-white text-xs px-3 py-1 rounded hover:bg-red-500"
+                                        className="bg-red-600 text-white text-xs px-3 py-1 rounded hover:bg-red-500 font-bold shadow"
                                     >
                                         {t.deleteSample}
                                     </button>
@@ -211,7 +305,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* Threshold Slider */}
             <div className="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-700">
                 <div className="flex flex-col items-end">
-                   {/* FIXED: Localized Label */}
                    <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">{t.thresholdLabel}</span>
                    <span className="text-xs text-cyan-400 font-mono font-bold">{threshold}</span>
                 </div>
@@ -248,7 +341,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+      {/* Main Content Scroll Container */}
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-6 scrollbar-hide">
         
         {/* ============ USER MANAGEMENT TAB / 用户管理标签页 ============ */}
         {activeSubTab === 'users' && (
@@ -257,10 +351,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className={`bg-gray-800 rounded-xl p-6 border transition-colors shadow-lg ${trainingMode === 'TRAIN' ? 'border-green-500 ring-1 ring-green-500' : 'border-gray-700'}`}>
               <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
                  <h2 className="text-xl font-bold text-white">
-                    {trainingMode === 'NEW' ? t.registerTitle : `${t.trainingTitle}: ${profiles.find(p => p.id === selectedProfileId)?.name}`}
+                    {trainingMode === 'NEW' 
+                        ? t.registerTitle 
+                        : `${t.trainingTitle}: ${selectedProfile?.name || 'Unknown'}` // Safe Check
+                    }
                  </h2>
                  {trainingMode === 'TRAIN' && (
-                    <button onClick={() => { setTrainingMode('NEW'); setSelectedProfileId(null); }} className="text-xs text-red-400 hover:text-red-300">
+                    <button 
+                        onClick={() => { 
+                            setTrainingMode('NEW'); 
+                            setSelectedProfileId(null); 
+                            setNewName('');
+                        }} 
+                        className="text-xs text-red-400 hover:text-red-300"
+                    >
                        {t.btnCancelTrain}
                     </button>
                  )}
@@ -307,7 +411,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </p>
                      ) : (
                         <>
-                           <p className="text-green-400 font-bold mb-2">{t.optimizing}: {profiles.find(p => p.id === selectedProfileId)?.name}</p>
+                           <p className="text-green-400 font-bold mb-2">
+                               {t.optimizing}: {selectedProfile?.name || 'Unknown'}
+                           </p>
                            <p className="text-gray-400 text-xs">{t.trainTips}</p>
                         </>
                      )}
@@ -353,8 +459,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {/* Delete Button / 删除按钮 */}
                     <div className="absolute top-2 right-2 z-10 flex gap-1">
                        <button 
-                         onClick={(e) => { e.stopPropagation(); if(confirm(t.confirmDeleteProfile)) onDeleteProfile(p.id); }} 
-                         className="text-white bg-red-600/80 hover:bg-red-500 rounded-full w-7 h-7 flex items-center justify-center transition shadow"
+                         onClick={(e) => { 
+                             e.stopPropagation(); 
+                             // Open Delete Confirmation Modal
+                             setDeleteConfirm({
+                                 type: 'PROFILE',
+                                 id: p.id,
+                                 name: p.name
+                             });
+                         }} 
+                         className="text-white bg-red-600/80 hover:bg-red-500 rounded-full w-7 h-7 flex items-center justify-center transition shadow cursor-pointer z-20"
                          title="Delete ID"
                        >
                          ×
@@ -372,7 +486,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <span className="text-white text-xs border border-white px-2 py-1 rounded bg-black/50">{t.manageSamples}</span>
                       </div>
                       <div className="absolute bottom-2 left-2 flex gap-0.5">
-                         {Array.from({length: Math.min(5, p.descriptors.length)}).map((_, i) => (
+                         {Array.from({length: Math.min(5, p.descriptors?.length || 0)}).map((_, i) => (
                              <div key={i} className="w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-sm"></div>
                          ))}
                       </div>
@@ -381,7 +495,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <h4 className="font-bold text-white text-lg truncate">{p.name}</h4>
                     <div className="flex justify-between items-center mt-2">
                         <span className="text-xs text-gray-400 font-mono">
-                           N={p.descriptors.length}
+                           N={p.descriptors?.length || 0}
                         </span>
                         {/* Add Sample Button / 添加样本按钮 */}
                         <button 

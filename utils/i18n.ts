@@ -1,3 +1,4 @@
+
 export const translations = {
   en: {
     appTitle: "68344042-4",
@@ -38,6 +39,10 @@ export const translations = {
     deleteSample: "Delete Sample",
     closeModal: "Close",
     confirmDeleteProfile: "Delete this entire identity?",
+    confirmDeleteSample: "Delete this training sample?",
+    actionUndone: "This action cannot be undone.",
+    btnConfirm: "Confirm Delete",
+    btnCancel: "Cancel",
     btnDelete: "Delete",
     noProfiles: "No profiles found.",
     
@@ -165,6 +170,10 @@ export const translations = {
     deleteSample: "删除此样本",
     closeModal: "关闭",
     confirmDeleteProfile: "确定要删除该身份及其所有数据吗？",
+    confirmDeleteSample: "确定要删除此训练样本吗？",
+    actionUndone: "此操作无法撤销。",
+    btnConfirm: "确认删除",
+    btnCancel: "取消",
     btnDelete: "删除",
     noProfiles: "暂无档案。",
     
