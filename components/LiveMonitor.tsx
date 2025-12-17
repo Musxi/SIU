@@ -9,6 +9,7 @@ interface LiveMonitorProps {
   onLogEntry: (log: RecognitionLog) => void;
   lang: Language;
   threshold: number;
+  logs: RecognitionLog[]; // Persistent logs passed from parent
 }
 
 type LoadingError = 'NETWORK' | 'CAMERA' | null;
@@ -20,7 +21,7 @@ const Icons = {
   Expression: () => <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
 }
 
-const LiveMonitor: React.FC<LiveMonitorProps> = ({ profiles, onLogEntry, lang, threshold }) => {
+const LiveMonitor: React.FC<LiveMonitorProps> = ({ profiles, onLogEntry, lang, threshold, logs }) => {
   const t = translations[lang];
   const videoRef = useRef<HTMLVideoElement>(null);
   
@@ -28,7 +29,7 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ profiles, onLogEntry, lang, t
   const isMountedRef = useRef(true);
   
   const [detections, setDetections] = useState<FaceDetection[]>([]);
-  const [recentLogs, setRecentLogs] = useState<RecognitionLog[]>([]);
+  // Removed local recentLogs state to fix persistence issue
   const [fps, setFps] = useState(0);
   const [isModelsLoaded, setIsModelsLoaded] = useState(false);
   const [loadingError, setLoadingError] = useState<LoadingError>(null);
@@ -101,20 +102,19 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ profiles, onLogEntry, lang, t
              // Process logs
              if (results.length > 0) { 
                results.forEach(det => {
-                 if (det.identified || det.confidence > 50) {
-                     const newLog: RecognitionLog = {
-                       id: uuidv4(),
-                       timestamp: Date.now(),
-                       personName: det.name,
-                       confidence: det.confidence,
-                       isUnknown: !det.identified,
-                       age: det.age,
-                       gender: det.gender,
-                       expression: det.expressions?.[0]?.expression
-                     };
-                     onLogEntry(newLog);
-                     setRecentLogs(prev => [newLog, ...prev].slice(0, 15));
-                 }
+                 // LOGIC UPDATE: We now log everything regardless of confidence to show "Unknowns" in the stream
+                 // The useFaceSystem hook handles debouncing to prevent spam.
+                 const newLog: RecognitionLog = {
+                   id: uuidv4(),
+                   timestamp: Date.now(),
+                   personName: det.name,
+                   confidence: det.confidence,
+                   isUnknown: !det.identified,
+                   age: det.age,
+                   gender: det.gender,
+                   expression: det.expressions?.[0]?.expression
+                 };
+                 onLogEntry(newLog);
                });
              }
           }
@@ -286,7 +286,7 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ profiles, onLogEntry, lang, t
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono">
-          {recentLogs.map(log => (
+          {logs.slice(0, 50).map(log => (
             <div key={log.id} className="flex flex-col gap-2 p-3 bg-gray-800/50 border-l-2 border-gray-600 animate-slide-in rounded-r-md">
                <div className="flex justify-between items-center text-xs border-b border-gray-700/50 pb-2">
                  <span className={log.isUnknown ? "text-red-400" : "text-green-400 font-bold"}>
@@ -314,7 +314,7 @@ const LiveMonitor: React.FC<LiveMonitorProps> = ({ profiles, onLogEntry, lang, t
                </div>
             </div>
           ))}
-          {recentLogs.length === 0 && (
+          {logs.length === 0 && (
               <div className="text-center py-10 text-gray-600 text-xs italic">
                   {t.waitingData}
               </div>

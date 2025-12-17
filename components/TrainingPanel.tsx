@@ -76,10 +76,10 @@ const TrainingPanel: React.FC<TrainingPanelProps> = ({
 
        // 2. Extract Real Feature Vector
        try {
-         const descriptor = await extractFaceDescriptor(videoRef.current);
-         if (descriptor) {
+         const result = await extractFaceDescriptor(videoRef.current);
+         if (result) {
             // Convert Float32Array to number array for storage
-            const descriptorArray = Array.from(descriptor);
+            const descriptorArray = Array.from(result.descriptor);
             onAddProfile(newName, imgDataUrl, descriptorArray);
             setNewName('');
             alert(`${t.alertAdded} (${newName})`);

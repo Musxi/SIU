@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PersonProfile, RecognitionLog } from '../types';
 import { translations, Language } from '../utils/i18n';
-import { loadModels, extractFaceDescriptor } from '../services/visionService';
+import { loadModels, extractFaceDescriptor, isVectorValidForPerson } from '../services/visionService';
 import DataVisualization from './DataVisualization';
 
 interface AdminDashboardProps {
@@ -37,26 +37,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [modelsReady, setModelsReady] = useState(false);
   const [loadingError, setLoadingError] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   
   const [trainingMode, setTrainingMode] = useState<'NEW' | 'TRAIN'>('NEW');
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
   // -- MODAL STATE --
-  // FIX: Store ID instead of full object to ensure real-time updates from parent state
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteState | null>(null);
 
-  // Derived state: Always get the latest profile data from props
+  // Derived state
   const editingProfile = profiles.find(p => p.id === editingProfileId) || null;
+  const selectedProfile = profiles.find(p => p.id === selectedProfileId);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  
-  // Mounted Ref Pattern to prevent "removeChild" and memory leaks
   const isMountedRef = useRef(true);
-
-  const selectedProfile = profiles.find(p => p.id === selectedProfileId);
 
   // Initialize AI Models
   useEffect(() => {
@@ -96,10 +93,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         setCameraActive(true);
+        setFeedbackMsg(null);
       }
     } catch(e) { 
         console.error("Camera access failed:", e);
-        if (isMountedRef.current) alert(t.cameraAccessDenied || "Camera Error"); 
+        if (isMountedRef.current) setFeedbackMsg(t.cameraAccessDenied || "Camera Error"); 
     }
   };
 
@@ -127,42 +125,76 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }
     }
 
-    if (isMountedRef.current) setIsProcessing(true);
+    if (isMountedRef.current) {
+        setIsProcessing(true);
+        setFeedbackMsg(null);
+    }
 
     try {
-        const descriptor = await extractFaceDescriptor(videoRef.current);
+        // USE STRICT MODE (true) for training
+        // This ensures minConfidence is high (0.85) so we only get clear faces
+        const result = await extractFaceDescriptor(videoRef.current, true);
         
-        if (!descriptor) {
-            alert(t.alertNoFace); 
-            if (isMountedRef.current) setIsProcessing(false);
+        if (!result) {
+            if (isMountedRef.current) {
+                setFeedbackMsg(t.alertNoFace + " (Quality too low)");
+                setIsProcessing(false);
+            }
             return;
+        }
+
+        const { descriptor, detection } = result;
+        const vector = Array.from(descriptor);
+
+        // DATA CONSISTENCY CHECK
+        // If adding to existing profile, check if it actually looks like them
+        if (trainingMode === 'TRAIN' && selectedProfile) {
+            const isValid = isVectorValidForPerson(vector, selectedProfile.descriptors);
+            if (!isValid) {
+                 if (isMountedRef.current) {
+                     setFeedbackMsg("⚠️ Sample Rejected: Face does not match this profile significantly. Please check lighting or angle.");
+                     setIsProcessing(false);
+                 }
+                 return;
+            }
         }
 
         if (canvasRef.current) {
             const ctx = canvasRef.current.getContext('2d');
             if (ctx) {
+                // Draw image
                 ctx.drawImage(videoRef.current, 0, 0, 320, 240);
+                
+                // Draw visual confirmation box so user knows what was captured
+                const box = detection.box;
+                // Since we draw at 320x240, we need to scale detection box (which is relative to video element size)
+                // Video element might be different, but face-api returns coords relative to input media
+                // We just rely on the fact that we passed videoRef.current to detectSingleFace
+                // The safest way is to draw the video frame as is.
+                
+                // Optional: Draw green box on the canvas image to burn it in? 
+                // Better to just save clean image, but show success.
+
                 const img = canvasRef.current.toDataURL('image/jpeg', 0.8);
-                const vector = Array.from(descriptor);
 
                 if (trainingMode === 'NEW') {
                    onAddProfile(newName, img, vector);
-                   if (isMountedRef.current) setNewName('');
-                   alert(t.alertAdded);
+                   if (isMountedRef.current) {
+                       setNewName('');
+                       setFeedbackMsg("✅ " + t.alertAdded);
+                   }
                 } else if (trainingMode === 'TRAIN' && selectedProfileId && onAddSample) {
                    onAddSample(selectedProfileId, img, vector);
-                   alert(t.alertSampleAdded);
                    if (isMountedRef.current) {
-                       setTrainingMode('NEW'); 
-                       setSelectedProfileId(null);
-                       setNewName(''); 
+                       setFeedbackMsg("✅ " + t.alertSampleAdded);
+                       // Optional: Stay in training mode to add more angles
                    }
                 }
             }
         }
     } catch (e) {
         console.error(e);
-        alert(t.alertProcessingError);
+        if (isMountedRef.current) setFeedbackMsg(t.alertProcessingError);
     } finally {
         if (isMountedRef.current) setIsProcessing(false);
     }
@@ -171,6 +203,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const startTrainingExisting = (id: string) => {
      setSelectedProfileId(id);
      setTrainingMode('TRAIN');
+     setFeedbackMsg(null);
   };
 
   const openEditModal = (profile: PersonProfile) => {
@@ -186,12 +219,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             setTrainingMode('NEW');
             setSelectedProfileId(null);
         }
-        // If we deleted the profile currently being edited
         if (editingProfileId === deleteConfirm.id) {
             setEditingProfileId(null);
         }
     } else if (deleteConfirm.type === 'SAMPLE' && deleteConfirm.sampleIndex !== undefined) {
-        // Just call remove; since editingProfile is derived, the UI will auto-update
         onRemoveSample(deleteConfirm.id, deleteConfirm.sampleIndex);
     }
     setDeleteConfirm(null);
@@ -365,6 +396,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             setTrainingMode('NEW'); 
                             setSelectedProfileId(null); 
                             setNewName('');
+                            setFeedbackMsg(null);
                         }} 
                         className="text-xs text-red-400 hover:text-red-300"
                     >
@@ -388,6 +420,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                    {loadingError && (
                        <div className="absolute inset-0 flex items-center justify-center bg-gray-900/90 text-red-400 text-sm text-center px-4">
                            {t.modelLoadError}
+                       </div>
+                   )}
+                   
+                   {/* Feedback Overlay */}
+                   {feedbackMsg && (
+                       <div className="absolute top-2 left-2 right-2 z-20 bg-black/70 backdrop-blur text-white text-xs px-3 py-2 rounded text-center border border-gray-500 shadow-xl animate-fade-in">
+                           {feedbackMsg}
                        </div>
                    )}
 
@@ -424,6 +463,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                {t.optimizing}: {selectedProfile?.name || 'Unknown'}
                            </p>
                            <p className="text-gray-400 text-xs">{t.trainTips}</p>
+                           <div className="text-xs text-yellow-500 mt-2 p-2 bg-yellow-900/20 border border-yellow-800 rounded">
+                               {t.trainTipsHelper}
+                           </div>
                         </>
                      )}
                   </div>

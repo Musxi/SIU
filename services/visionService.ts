@@ -11,7 +11,9 @@ declare const faceapi: any; // Global from CDN (in index.html)
 let isCriticalModelsLoaded = false;
 let isDemographicsLoaded = false; 
 let faceMatcher: any = null;
-let lastDescriptorCount = -1;
+
+// Cache Control
+let lastProfileFingerprint = ""; 
 
 // PROMISE CACHE
 let loadingPromise: Promise<boolean> | null = null;
@@ -19,20 +21,14 @@ let loadingPromise: Promise<boolean> | null = null;
 // Configuration
 const CONFIG = {
   // Priority list of Model URLs to try. 
-  // If one fails, the system will automatically try the next.
-  // 模型源优先级列表，如果第一个失败，会自动尝试下一个。
   MODEL_URLS: [
-    // Source 1: jsDelivr (Pinned version - usually fastest)
     'https://cdn.jsdelivr.net/gh/cgarciagl/face-api.js@0.22.2/weights',
-    // Source 2: Official GitHub Pages (Stable fallback)
     'https://justadudewhohacks.github.io/face-api.js/models',
-    // Source 3: jsDelivr (Master branch - fallback)
     'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights'
   ],
-  TIMEOUT_MS: 60000 // Increased to 60 seconds to accommodate slower networks
+  TIMEOUT_MS: 60000 
 };
 
-// Helper: Timeout Wrapper for Promises
 const withTimeout = (ms: number, promise: Promise<any>) => {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -52,28 +48,21 @@ const withTimeout = (ms: number, promise: Promise<any>) => {
 
 /**
  * Load AI Models (Robust Multi-Source Strategy)
- * 加载 AI 模型（稳健的多源策略）
  */
 export const loadModels = (): Promise<boolean> => {
-  // 0. Safety Check
   if (typeof faceapi === 'undefined') {
     console.error("Face-api.js not loaded. Check index.html.");
     return Promise.resolve(false);
   }
 
-  // 1. If already loaded, return immediately
   if (isCriticalModelsLoaded) return Promise.resolve(true);
-
-  // 2. If currently loading, return the existing promise
   if (loadingPromise) return loadingPromise;
 
-  // 3. Start loading process
   loadingPromise = (async () => {
     for (const url of CONFIG.MODEL_URLS) {
       try {
         console.log(`Attempting to load models from: ${url} ...`);
         
-        // Load Critical Models with Timeout
         await withTimeout(CONFIG.TIMEOUT_MS, Promise.all([
           faceapi.nets.ssdMobilenetv1.loadFromUri(url),
           faceapi.nets.faceLandmark68Net.loadFromUri(url),
@@ -83,14 +72,10 @@ export const loadModels = (): Promise<boolean> => {
         console.log(`✅ Success: Critical models loaded from ${url}`);
         isCriticalModelsLoaded = true;
 
-        // Try to load Demographics (Background, Non-blocking for success)
-        // Note: We use the same URL that worked for critical models
         loadDemographicsBackground(url);
-
         return true;
       } catch (error) {
         console.warn(`❌ Failed to load from ${url}:`, error);
-        // Continue to next URL in the loop
       }
     }
 
@@ -102,7 +87,6 @@ export const loadModels = (): Promise<boolean> => {
   return loadingPromise;
 };
 
-// Helper to load extra models without blocking the main app flow
 const loadDemographicsBackground = async (url: string) => {
   try {
     await Promise.all([
@@ -119,8 +103,14 @@ const loadDemographicsBackground = async (url: string) => {
 
 /**
  * Extract Feature Vector from an Image
+ * @param imageElement Video or Image element
+ * @param strictMode If true, requires higher confidence (0.85) to accept the face. Used for registration.
  */
-export const extractFaceDescriptor = async (imageElement: HTMLImageElement | HTMLVideoElement): Promise<Float32Array | null> => {
+export const extractFaceDescriptor = async (
+    imageElement: HTMLImageElement | HTMLVideoElement,
+    strictMode: boolean = false
+): Promise<{ descriptor: Float32Array; detection: any } | null> => {
+  
   if (!isCriticalModelsLoaded) {
       const success = await loadModels();
       if (!success) return null;
@@ -131,12 +121,22 @@ export const extractFaceDescriptor = async (imageElement: HTMLImageElement | HTM
         return null;
       }
 
-      const detection = await faceapi.detectSingleFace(imageElement)
+      // Config: High confidence for registration to prevent blurry/bad samples
+      const options = strictMode 
+        ? new faceapi.SsdMobilenetv1Options({ minConfidence: 0.85 }) 
+        : new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
+
+      // Use detectSingleFace for registration to ensure we get the MAIN face
+      const detection = await faceapi.detectSingleFace(imageElement, options)
         .withFaceLandmarks()
         .withFaceDescriptor();
 
       if (!detection) return null;
-      return detection.descriptor;
+      
+      return { 
+          descriptor: detection.descriptor,
+          detection: detection.detection
+      };
   } catch (e) {
       console.error("Extraction error:", e);
       return null;
@@ -144,17 +144,50 @@ export const extractFaceDescriptor = async (imageElement: HTMLImageElement | HTM
 };
 
 /**
+ * Validate Similarity
+ * Checks if a new vector matches the "centroid" of existing vectors for a person.
+ * Prevents adding "dirty" data (wrong person or extreme outlier).
+ */
+export const isVectorValidForPerson = (
+    newVector: number[], 
+    existingVectors: number[][],
+    tolerance: number = 0.65 // Distance threshold (Lower = Stricter)
+): boolean => {
+    if (!existingVectors || existingVectors.length === 0) return true;
+
+    // Compare against all existing samples and find the best match (Nearest Neighbor)
+    // If the new sample is far from ALL existing samples, it's likely bad data.
+    let minDistance = 1.0;
+    
+    // We assume newVector and existingVectors are standard 128d arrays
+    // faceapi.euclideanDistance expects Float32Array or array
+    for (const v of existingVectors) {
+        const dist = faceapi.euclideanDistance(newVector, v);
+        if (dist < minDistance) minDistance = dist;
+    }
+
+    console.log(`🔍 Sample Consistency Check: Min Distance = ${minDistance.toFixed(3)} (Limit: ${tolerance})`);
+    
+    return minDistance < tolerance;
+};
+
+/**
  * Build/Update the Face Matcher
+ * Now uses a stricter fingerprint check to ensure updates are applied immediately.
  */
 const updateFaceMatcher = (profiles: PersonProfile[], threshold: number) => {
   if (!faceapi || !isCriticalModelsLoaded) return;
 
-  const currentDescriptorCount = profiles.reduce((acc, p) => acc + p.descriptors.length, 0);
+  // Create a fingerprint string based on IDs and number of descriptors
+  // This ensures if a sample is added (descriptors.length changes) or a person deleted (id changes), we update.
+  const currentFingerprint = profiles.map(p => `${p.id}:${p.descriptors.length}`).join('|') + `_T${threshold}`;
   
-  if (currentDescriptorCount === lastDescriptorCount && faceMatcher) {
-    return;
+  if (currentFingerprint === lastProfileFingerprint && faceMatcher) {
+    return; // Cache hit, no changes
   }
 
+  console.log("♻️ Rebuilding Face Matcher Index...");
+  
   const labeledDescriptors: any[] = [];
   profiles.forEach(p => {
     if (p.descriptors && p.descriptors.length > 0) {
@@ -171,7 +204,7 @@ const updateFaceMatcher = (profiles: PersonProfile[], threshold: number) => {
     faceMatcher = null;
   }
   
-  lastDescriptorCount = currentDescriptorCount;
+  lastProfileFingerprint = currentFingerprint;
 };
 
 /**
@@ -187,8 +220,10 @@ export const detectFacesReal = async (
 
   try {
     // 1. Detection
-    // Using default SSD MobileNet V1 options
-    let task = faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
+    // Use slightly looser options for real-time monitoring to catch faces in motion
+    const options = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
+    
+    let task = faceapi.detectAllFaces(video, options).withFaceLandmarks().withFaceDescriptors();
     
     if (isDemographicsLoaded) {
         task = task.withFaceExpressions().withAgeAndGender();
@@ -197,7 +232,7 @@ export const detectFacesReal = async (
     const detections = await task;
     if (!detections.length) return [];
 
-    // 2. Update Matcher (Sync)
+    // 2. Update Matcher (Sync check)
     updateFaceMatcher(profiles, threshold);
 
     // 3. Match
@@ -207,18 +242,20 @@ export const detectFacesReal = async (
       let identified = false;
 
       if (faceMatcher) {
+        // Find best match in DB
         const bestMatch = faceMatcher.findBestMatch(d.descriptor);
-        if (bestMatch.distance < threshold) {
+        
+        // FaceAPI distance: 0.0 (Exact) -> 1.0 (Far)
+        if (bestMatch.label !== 'unknown') {
           name = bestMatch.label;
           identified = true;
-          const score = Math.max(0, 1 - (bestMatch.distance / threshold));
-          confidence = Math.floor(score * 100); 
+          confidence = Math.round(Math.max(0, (1 - bestMatch.distance) * 100));
         } else {
-           confidence = Math.floor((1 - Math.min(1, bestMatch.distance)) * 100); 
+           confidence = Math.round(Math.max(0, (1 - bestMatch.distance) * 100));
         }
       }
 
-      // 4. Normalize Box
+      // 4. Normalize Box for UI
       const box = d.detection.box; 
       const vW = video.videoWidth || 640;
       const vH = video.videoHeight || 480;
@@ -250,7 +287,6 @@ export const detectFacesReal = async (
 
     return results;
   } catch (err) {
-    // console.warn("Face detection pipeline skipped frame:", err);
     return [];
   }
 };

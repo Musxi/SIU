@@ -102,6 +102,7 @@ const App: React.FC = () => {
             onLogEntry={addLog}
             lang={lang}
             threshold={threshold}
+            logs={logs}
           />
         ) : (
           <AdminDashboard 
