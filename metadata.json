@@ -1,0 +1,7 @@
+{
+  "name": "68344042-4 Face Guard",
+  "description": "An intelligent face recognition system powered by Gemini 2.5 Flash. It features real-time recognition, active learning dataset management, and data visualization.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
