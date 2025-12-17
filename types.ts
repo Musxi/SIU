@@ -13,6 +13,7 @@ export interface AppConfig {
   logoText: string;
   logoColor: 'cyan' | 'purple' | 'green' | 'blue' | 'red';
   defaultLang: 'en' | 'zh';
+  copyrightText?: string; // New configurable copyright field
   features?: {
     showKpis?: boolean;
     [key: string]: any; // Allow for comment fields in features

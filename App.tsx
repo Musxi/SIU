@@ -66,7 +66,7 @@ const App: React.FC = () => {
         
         {/* Branding / 品牌标识 (Dynamic from Config) */}
         <div className="flex items-center gap-2">
-          <div className={`w-6 h-6 rounded-sm flex items-center justify-center font-bold text-black text-[10px] ${getLogoColorClass(config.logoColor)}`}>
+          <div className={`w-8 h-6 rounded-sm flex items-center justify-center font-bold text-black text-[10px] ${getLogoColorClass(config.logoColor)}`}>
             {config.logoText}
           </div>
           <h1 className="text-xl font-bold font-mono tracking-tighter text-gray-100">
@@ -95,7 +95,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content Area / 主内容区 */}
-      <main className="flex-1 relative overflow-hidden">
+      <main className="flex-1 relative overflow-hidden flex flex-col">
         {activeTab === AppMode.MONITOR ? (
           <LiveMonitor 
             profiles={profiles}
@@ -118,6 +118,15 @@ const App: React.FC = () => {
           />
         )}
       </main>
+
+      {/* Footer / 底部版权信息 */}
+      {config.copyrightText && (
+        <footer className="bg-black border-t border-gray-800 py-1 text-center shrink-0 z-50">
+          <p className="text-[10px] text-gray-600 font-mono">
+            {config.copyrightText}
+          </p>
+        </footer>
+      )}
 
     </div>
   );

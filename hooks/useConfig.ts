@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { AppConfig } from '../types';
 
 const DEFAULT_CONFIG: AppConfig = {
-  appName: "68344042-4",
-  appVersion: "v2.0",
-  logoText: "68",
+  appName: "Facial recognition test",
+  appVersion: "v2.3",
+  logoText: "SIU",
   logoColor: "cyan",
-  defaultLang: "zh"
+  defaultLang: "zh",
+  copyrightText: "© 2025 68344042-4. All Rights Reserved."
 };
 
 export const useConfig = () => {
