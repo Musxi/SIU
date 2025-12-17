@@ -198,10 +198,11 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ profiles, logs, l
                     </div>
                   </td>
                   <td className="px-4 py-3">
+                    {/* FIXED: Localized Status Tags */}
                     {log.isUnknown ? (
-                        <span className="px-2 py-1 rounded-full bg-red-900/50 text-red-400 text-xs border border-red-800">UNKNOWN</span>
+                        <span className="px-2 py-1 rounded-full bg-red-900/50 text-red-400 text-xs border border-red-800">{t.unknown}</span>
                     ) : (
-                        <span className="px-2 py-1 rounded-full bg-green-900/50 text-green-400 text-xs border border-green-800">VERIFIED</span>
+                        <span className="px-2 py-1 rounded-full bg-green-900/50 text-green-400 text-xs border border-green-800">{t.verified}</span>
                     )}
                   </td>
                 </tr>

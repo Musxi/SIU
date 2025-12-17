@@ -10,6 +10,7 @@ export const translations = {
     langSelect: "Language Selection",
     tabTrain: "Face Database",
     tabStats: "Analytics",
+    thresholdLabel: "Recognition Threshold",
     
     // Registration & Training
     registerTitle: "Register Identity",
@@ -46,7 +47,6 @@ export const translations = {
     chartFreq: "Recognition Frequency (Top 10)",
     chartTrend: "Confidence Trend",
     totalSamples: "Total Vectors",
-    // New Chart Keys
     waitingData: "Waiting for real-time data...",
     noLogs: "No recognition logs available.",
     confName: "Confidence Score",
@@ -73,11 +73,47 @@ export const translations = {
     btnScan: "Scan",
     capturedFrame: "Captured Frame",
     
+    // HUD & Labels
+    engine: "ENGINE",
+    fps: "FPS",
+    faces: "FACES",
+    unknown: "UNKNOWN",
+    verified: "VERIFIED",
+    downloadingWeights: "Downloading Weights (~10MB)...",
+    initializing: "Initializing Neural Networks...",
+    
+    // Stream Data Labels (New)
+    matchScore: "Match Score",
+    
+    // Demographics Labels (Standardized)
+    ageLabel: "Age",
+    genderLabel: "Gender",
+    expressionLabel: "Expression",
+    ageUnit: "yrs",
+
+    // Demographics & Expressions values
+    genders: {
+        male: "Male",
+        female: "Female"
+    },
+    expressions: {
+        neutral: "Neutral",
+        happy: "Happy",
+        sad: "Sad",
+        angry: "Angry",
+        fearful: "Fearful",
+        disgusted: "Disgusted",
+        surprised: "Surprised"
+    },
+
     // Alerts
     alertEnterName: "Please enter a name.",
     alertAdded: "Identity registered successfully.",
     alertSampleAdded: "New sample vector added to dataset.",
     alertNoFace: "No face detected. Please ensure good lighting.",
+    alertProcessingError: "Error during face processing.",
+    cameraAccessDenied: "Camera Access Denied",
+    modelLoadError: "Error: Failed to download AI Models (Check Internet)",
     dbEmpty: "Database is empty. Please register identities in the Configuration tab."
   },
   zh: {
@@ -91,6 +127,7 @@ export const translations = {
     langSelect: "语言选择",
     tabTrain: "人脸库管理",
     tabStats: "数据分析",
+    thresholdLabel: "识别阈值",
     
     // Registration & Training
     registerTitle: "身份注册",
@@ -127,7 +164,6 @@ export const translations = {
     chartFreq: "识别频率统计 (Top 10)",
     chartTrend: "置信度趋势",
     totalSamples: "特征向量总数",
-    // New Chart Keys
     waitingData: "等待实时数据...",
     noLogs: "暂无识别记录。",
     confName: "置信度评分",
@@ -154,11 +190,47 @@ export const translations = {
     btnScan: "扫描",
     capturedFrame: "捕获画面",
     
+    // HUD & Labels
+    engine: "引擎",
+    fps: "帧率",
+    faces: "人脸数",
+    unknown: "未知",
+    verified: "已验证",
+    downloadingWeights: "正在下载模型权重 (~10MB)...",
+    initializing: "正在初始化神经网络...",
+    
+    // Stream Data Labels (New)
+    matchScore: "匹配置信度",
+    
+    // Demographics Labels (Standardized)
+    ageLabel: "年龄",
+    genderLabel: "性别",
+    expressionLabel: "表情",
+    ageUnit: "岁",
+
+    // Demographics & Expressions values
+    genders: {
+        male: "男性",
+        female: "女性"
+    },
+    expressions: {
+        neutral: "自然",
+        happy: "开心",
+        sad: "悲伤",
+        angry: "愤怒",
+        fearful: "恐惧",
+        disgusted: "厌恶",
+        surprised: "惊讶"
+    },
+
     // Alerts
     alertEnterName: "请输入姓名。",
     alertAdded: "身份注册成功。",
     alertSampleAdded: "新样本向量已添加至数据集。",
     alertNoFace: "未检测到人脸，请确保光线充足。",
+    alertProcessingError: "人脸处理过程中出错。",
+    cameraAccessDenied: "无法访问摄像头",
+    modelLoadError: "错误：无法下载 AI 模型（请检查网络）",
     dbEmpty: "数据库为空。请在配置页面注册身份。"
   }
 };

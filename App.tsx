@@ -13,10 +13,12 @@ const App: React.FC = () => {
   const { 
     profiles, 
     logs, 
+    threshold, // From Hook
+    setThreshold, // From Hook
     addProfile, 
     deleteProfile, 
     addSampleToProfile, 
-    removeSampleFromProfile, // NEW: Delete specific samples
+    removeSampleFromProfile, 
     addLog 
   } = useFaceSystem();
 
@@ -63,6 +65,7 @@ const App: React.FC = () => {
             profiles={profiles}
             onLogEntry={addLog}
             lang={lang}
+            threshold={threshold}
           />
         ) : (
           <AdminDashboard 
@@ -74,6 +77,8 @@ const App: React.FC = () => {
             onRemoveSample={removeSampleFromProfile}
             lang={lang}
             setLang={setLang}
+            threshold={threshold}
+            setThreshold={setThreshold}
           />
         )}
       </main>

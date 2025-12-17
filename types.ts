@@ -30,6 +30,10 @@ export interface FaceDetection {
   name: string;
   confidence: number;
   box_2d: number[]; // [ymin, xmin, ymax, xmax]
+  // Demographics (Optional, in case model fails to load)
+  age?: number;
+  gender?: string;
+  expressions?: { expression: string; probability: number }[];
 }
 
 // Legacy support

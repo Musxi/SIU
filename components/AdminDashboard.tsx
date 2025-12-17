@@ -13,6 +13,8 @@ interface AdminDashboardProps {
   onRemoveSample: (id: string, index: number) => void;
   lang: Language;
   setLang: (lang: Language) => void;
+  threshold: number; // New Prop
+  setThreshold: (val: number) => void; // New Prop
 }
 
 /**
@@ -20,7 +22,8 @@ interface AdminDashboardProps {
  * 配置与管理面板
  */
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
-  profiles, logs, onAddProfile, onDeleteProfile, onAddSample, onRemoveSample, lang, setLang
+  profiles, logs, onAddProfile, onDeleteProfile, onAddSample, onRemoveSample, 
+  lang, setLang, threshold, setThreshold 
 }) => {
   const t = translations[lang];
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'analytics'>('users');
@@ -99,7 +102,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }
     } catch (e) {
         console.error(e);
-        alert("Error during face processing.");
+        alert(t.alertProcessingError);
     } finally {
         setIsProcessing(false);
     }
@@ -141,9 +144,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <button 
                                         onClick={() => {
                                             onRemoveSample(editingProfile.id, idx);
-                                            // Close modal if all samples deleted, or update local reference? 
-                                            // Since profiles is prop, we just close or wait for re-render. 
-                                            // Simple UX: Close modal to refresh state correctly.
                                             setEditingProfile(null); 
                                         }}
                                         className="bg-red-600 text-white text-xs px-3 py-1 rounded hover:bg-red-500"
@@ -166,7 +166,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* Sub Navigation & Header / 子导航与头部 */}
-      <div className="bg-gray-800 p-4 border-b border-gray-700 flex flex-wrap justify-between items-center gap-4 shrink-0">
+      <div className="bg-gray-800 p-4 border-b border-gray-700 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0">
         <div className="flex gap-4">
             <button 
             onClick={() => setActiveSubTab('users')}
@@ -182,23 +182,45 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
         </div>
 
-        {/* Language Switcher located in Configuration now / 语言切换现在位于配置页 */}
-        <div className="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-700">
-            <span className="text-xs text-gray-500 font-mono uppercase">{t.langSelect}:</span>
-            <div className="flex gap-1">
-                <button 
-                    onClick={() => setLang('zh')}
-                    className={`text-xs px-2 py-1 rounded transition ${lang === 'zh' ? 'bg-gray-700 text-white font-bold' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                    中文
-                </button>
-                <div className="w-[1px] bg-gray-700 h-4 self-center"></div>
-                <button 
-                    onClick={() => setLang('en')}
-                    className={`text-xs px-2 py-1 rounded transition ${lang === 'en' ? 'bg-gray-700 text-white font-bold' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                    EN
-                </button>
+        {/* SETTINGS AREA (Threshold + Lang) */}
+        <div className="flex items-center gap-4 flex-wrap justify-end">
+            
+            {/* Threshold Slider */}
+            <div className="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-700">
+                <div className="flex flex-col items-end">
+                   {/* FIXED: Localized Label */}
+                   <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">{t.thresholdLabel}</span>
+                   <span className="text-xs text-cyan-400 font-mono font-bold">{threshold}</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0.3" 
+                  max="0.8" 
+                  step="0.01"
+                  value={threshold}
+                  onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                  className="w-24 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+            </div>
+
+            {/* Language */}
+            <div className="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-700">
+                <span className="text-xs text-gray-500 font-mono uppercase">{t.langSelect}:</span>
+                <div className="flex gap-1">
+                    <button 
+                        onClick={() => setLang('zh')}
+                        className={`text-xs px-2 py-1 rounded transition ${lang === 'zh' ? 'bg-gray-700 text-white font-bold' : 'text-gray-500 hover:text-gray-300'}`}
+                    >
+                        中文
+                    </button>
+                    <div className="w-[1px] bg-gray-700 h-4 self-center"></div>
+                    <button 
+                        onClick={() => setLang('en')}
+                        className={`text-xs px-2 py-1 rounded transition ${lang === 'en' ? 'bg-gray-700 text-white font-bold' : 'text-gray-500 hover:text-gray-300'}`}
+                    >
+                        EN
+                    </button>
+                </div>
             </div>
         </div>
       </div>
