@@ -13,17 +13,23 @@ let isDemographicsLoaded = false;
 let faceMatcher: any = null;
 let lastDescriptorCount = -1;
 
-// PROMISE CACHE (Prevents double-loading race conditions)
+// PROMISE CACHE
 let loadingPromise: Promise<boolean> | null = null;
 
 // Configuration
 const CONFIG = {
-  // Switch to GitHub Pages hosting which is often more stable for these static assets than jsDelivr GH proxy
-  // 切换到更稳定的模型源
-  MODEL_URL: 'https://justadudewhohacks.github.io/face-api.js/models',
-  // Fallback URL in case the above fails (optional logic can be added later)
-  // MODEL_URL_BACKUP: 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights',
-  TIMEOUT_MS: 15000 // 15 seconds timeout
+  // Priority list of Model URLs to try. 
+  // If one fails, the system will automatically try the next.
+  // 模型源优先级列表，如果第一个失败，会自动尝试下一个。
+  MODEL_URLS: [
+    // Source 1: jsDelivr (Pinned version - usually fastest)
+    'https://cdn.jsdelivr.net/gh/cgarciagl/face-api.js@0.22.2/weights',
+    // Source 2: Official GitHub Pages (Stable fallback)
+    'https://justadudewhohacks.github.io/face-api.js/models',
+    // Source 3: jsDelivr (Master branch - fallback)
+    'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights'
+  ],
+  TIMEOUT_MS: 60000 // Increased to 60 seconds to accommodate slower networks
 };
 
 // Helper: Timeout Wrapper for Promises
@@ -45,13 +51,13 @@ const withTimeout = (ms: number, promise: Promise<any>) => {
 };
 
 /**
- * Load AI Models (Singleton Pattern with Timeout)
- * 加载 AI 模型（带超时的单例模式）
+ * Load AI Models (Robust Multi-Source Strategy)
+ * 加载 AI 模型（稳健的多源策略）
  */
 export const loadModels = (): Promise<boolean> => {
-  // 0. Safety Check for Global
+  // 0. Safety Check
   if (typeof faceapi === 'undefined') {
-    console.error("Face-api.js not loaded. Check index.html or network connection.");
+    console.error("Face-api.js not loaded. Check index.html.");
     return Promise.resolve(false);
   }
 
@@ -61,45 +67,54 @@ export const loadModels = (): Promise<boolean> => {
   // 2. If currently loading, return the existing promise
   if (loadingPromise) return loadingPromise;
 
-  // 3. Start loading
+  // 3. Start loading process
   loadingPromise = (async () => {
-    try {
-      console.log(`Loading Critical Face Models from ${CONFIG.MODEL_URL}...`);
-      
-      // Load models with strict timeout to prevent hanging
-      await withTimeout(CONFIG.TIMEOUT_MS, Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri(CONFIG.MODEL_URL),
-        faceapi.nets.faceLandmark68Net.loadFromUri(CONFIG.MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(CONFIG.MODEL_URL)
-      ]));
-      
-      isCriticalModelsLoaded = true;
-      console.log("Critical Models Loaded Successfully.");
+    for (const url of CONFIG.MODEL_URLS) {
+      try {
+        console.log(`Attempting to load models from: ${url} ...`);
+        
+        // Load Critical Models with Timeout
+        await withTimeout(CONFIG.TIMEOUT_MS, Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri(url),
+          faceapi.nets.faceLandmark68Net.loadFromUri(url),
+          faceapi.nets.faceRecognitionNet.loadFromUri(url)
+        ]));
+        
+        console.log(`✅ Success: Critical models loaded from ${url}`);
+        isCriticalModelsLoaded = true;
 
-      // Load Demographics (Non-blocking / Optional)
-      // We don't await this strictly for the main promise to resolve true, 
-      // but we start it here.
-      withTimeout(CONFIG.TIMEOUT_MS, Promise.all([
-          faceapi.nets.faceExpressionNet.loadFromUri(CONFIG.MODEL_URL),
-          faceapi.nets.ageGenderNet.loadFromUri(CONFIG.MODEL_URL)
-      ]))
-      .then(() => {
-          isDemographicsLoaded = true;
-          console.log("Demographics Loaded.");
-      })
-      .catch(e => console.warn("Demographics skipped:", e));
+        // Try to load Demographics (Background, Non-blocking for success)
+        // Note: We use the same URL that worked for critical models
+        loadDemographicsBackground(url);
 
-      return true;
-    } catch (error) {
-      console.error("CRITICAL: Failed to load core models:", error);
-      // IMPORTANT: Reset promise so UI can try again manually if needed
-      loadingPromise = null; 
-      isCriticalModelsLoaded = false;
-      return false;
+        return true;
+      } catch (error) {
+        console.warn(`❌ Failed to load from ${url}:`, error);
+        // Continue to next URL in the loop
+      }
     }
+
+    console.error("CRITICAL: All model sources failed.");
+    loadingPromise = null; 
+    return false;
   })();
 
   return loadingPromise;
+};
+
+// Helper to load extra models without blocking the main app flow
+const loadDemographicsBackground = async (url: string) => {
+  try {
+    await Promise.all([
+        faceapi.nets.faceExpressionNet.loadFromUri(url),
+        faceapi.nets.ageGenderNet.loadFromUri(url)
+    ]);
+    isDemographicsLoaded = true;
+    console.log("✅ Demographics models loaded.");
+  } catch (e) {
+    console.warn("Demographics skipped (Non-fatal).");
+    isDemographicsLoaded = false;
+  }
 };
 
 /**
@@ -107,13 +122,11 @@ export const loadModels = (): Promise<boolean> => {
  */
 export const extractFaceDescriptor = async (imageElement: HTMLImageElement | HTMLVideoElement): Promise<Float32Array | null> => {
   if (!isCriticalModelsLoaded) {
-      // Try loading one last time
       const success = await loadModels();
       if (!success) return null;
   }
 
   try {
-      // Ensure element is valid and ready
       if (imageElement instanceof HTMLVideoElement && (imageElement.paused || imageElement.ended || !imageElement.videoWidth)) {
         return null;
       }
@@ -134,7 +147,7 @@ export const extractFaceDescriptor = async (imageElement: HTMLImageElement | HTM
  * Build/Update the Face Matcher
  */
 const updateFaceMatcher = (profiles: PersonProfile[], threshold: number) => {
-  if (!faceapi) return;
+  if (!faceapi || !isCriticalModelsLoaded) return;
 
   const currentDescriptorCount = profiles.reduce((acc, p) => acc + p.descriptors.length, 0);
   
@@ -145,7 +158,6 @@ const updateFaceMatcher = (profiles: PersonProfile[], threshold: number) => {
   const labeledDescriptors: any[] = [];
   profiles.forEach(p => {
     if (p.descriptors && p.descriptors.length > 0) {
-        // Convert plain arrays back to Float32Array for face-api
         const vectors = p.descriptors.map(d => new Float32Array(d));
         labeledDescriptors.push(
             new faceapi.LabeledFaceDescriptors(p.name, vectors)
@@ -175,7 +187,7 @@ export const detectFacesReal = async (
 
   try {
     // 1. Detection
-    // Use lightweight detection options if possible for speed, but SSD is standard in this app
+    // Using default SSD MobileNet V1 options
     let task = faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
     
     if (isDemographicsLoaded) {
@@ -210,7 +222,6 @@ export const detectFacesReal = async (
       const box = d.detection.box; 
       const vW = video.videoWidth || 640;
       const vH = video.videoHeight || 480;
-      // Safety div by zero check
       const scaleX = vW > 0 ? 1000 / vW : 1;
       const scaleY = vH > 0 ? 1000 / vH : 1;
 
@@ -239,7 +250,7 @@ export const detectFacesReal = async (
 
     return results;
   } catch (err) {
-    console.warn("Face detection pipeline skipped frame:", err);
+    // console.warn("Face detection pipeline skipped frame:", err);
     return [];
   }
 };
